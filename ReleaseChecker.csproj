@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Change to net10.0 if that's what your machine/pipeline has -->
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>ReleaseChecker</AssemblyName>
+    <RootNamespace>ReleaseChecker</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Official Microsoft T-SQL parser (same one SSDT/SSMS use). Works fully offline. -->
+    <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="161.9142.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- rules.json ships next to the exe -->
+    <None Update="rules.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- sample repo is data, not part of the build -->
+    <None Remove="sample\**" />
+  </ItemGroup>
+
+</Project>

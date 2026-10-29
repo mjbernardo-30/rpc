@@ -1,0 +1,120 @@
+// ReleaseChecker rules. Comments are allowed. Any section or property left out uses the built-in default.
+// One section per check: "sql" for SQL SCRIPTS, "config" for CONFIG.
+{
+  "sql": {
+    // 160 = SQL Server 2022, 150 = 2019, 140 = 2017, 130 = 2016
+    "parserVersion": 160,
+
+    // Anything not listed here (and not a CREATE/ALTER below) is an ERROR.
+    "allowedStatements": [
+      "SelectStatement", "InsertStatement", "UpdateStatement", "DeleteStatement", "MergeStatement",
+      "GrantStatement",
+
+      "IfStatement", "WhileStatement", "BeginEndBlockStatement", "TryCatchStatement",
+      "DeclareVariableStatement", "DeclareTableVariableStatement", "SetVariableStatement",
+      "PredicateSetStatement", "SetIdentityInsertStatement", "SetTransactionIsolationLevelStatement",
+      "PrintStatement", "ThrowStatement", "RaiseErrorStatement", "ReturnStatement",
+      "BreakStatement", "ContinueStatement",
+
+      "BeginTransactionStatement", "CommitTransactionStatement",
+      "RollbackTransactionStatement", "SaveTransactionStatement",
+
+      "DeclareCursorStatement", "OpenCursorStatement", "FetchCursorStatement",
+      "CloseCursorStatement", "DeallocateCursorStatement"
+    ],
+
+    // All CREATE ... / ALTER ... statements are allowed, except names starting with these prefixes.
+    "allowAllCreateAlter": true,
+    "deniedCreateAlterPrefixes": [
+      "CreateDatabase", "AlterDatabase", "CreateLogin", "AlterLogin",
+      "CreateServer", "AlterServer", "CreateEndpoint", "AlterEndpoint"
+    ],
+
+    // Allowed but reported as WARNING (the tool can't see what they run).
+    "warnStatements": [ "ExecuteStatement" ],
+
+    // DROP TABLE is only allowed for these table name endings (case-insensitive) and temp tables.
+    "droppableTableSuffixes": [ "Stg" ],
+    "allowDropTempTables": true,
+    "allowTruncateOnStaging": false,
+
+    // Change a rule's severity: "Error", "Warning", "Info" or "Off". SYNTAX_ERROR can't be changed.
+    // Rule IDs are shown in the console and in the report's Rule column.
+    "severityOverrides": {
+      // "CREATE_TABLE_NOT_GUARDED": "Off",
+      // "UPDATE_NO_WHERE": "Error"
+    },
+
+    // false = suppression files can only accept WARNINGS. Disallowed operations always block the release.
+    "allowSuppressingErrors": false,
+
+    // Looked up next to each module's impl_list.txt
+    "suppressionFileName": "sqlcheck.suppressions.json",
+
+    // New objects must be granted in the grant script listed in impl_list.
+    // Missing grant -> GRANT_MISSING error on the grant script. GRANT ... ON SCHEMA::dbo and GRANT ALL also count.
+    "grantCheck": {
+      "enabled": true,
+      "grantScripts": [ "GrantAccess.sql" ],      // file name or relative path, * wildcards allowed
+      "requireGrantScript": true,                 // warn when objects are created but no grant script is listed
+      "required": {
+        // object types: Table, Procedure, View, Function
+        "Table": [
+          { "principal": "SEL", "permissions": [ "SELECT" ] },
+          { "principal": "RIM", "permissions": [ "SELECT", "INSERT", "UPDATE", "DELETE" ] }
+        ],
+        "Procedure": [
+          { "principal": "RIM", "permissions": [ "EXECUTE" ] }
+        ]
+      },
+      "excludeObjects": [ ]                       // e.g. "*Stg", "dbo.AuditLog"
+    }
+  },
+
+  "config": {
+    // Service config folder relative to the repo. {country} and {env} are filled in; must end with {service}.
+    "pathTemplate": "{country}/App/Config/{env}/Web/{service}",
+
+    // Compared against each other: same keys everywhere, but database / base URL must differ.
+    "environments": [ "SIT", "UAT", "PROD" ],
+
+    // Every service must have these files in every environment.
+    "files": [
+      { "name": "appsettings.json", "format": "json" },
+      { "name": "nlog.config",      "format": "xml" },
+      { "name": "web.config",       "format": "xml" }
+    ],
+
+    // XML attributes that identify an element, so order doesn't matter: <add key="...">, <target name="...">
+    "xmlIdentityAttributes": [ "key", "name", "id" ],
+
+    // Keys left out of all comparisons (wildcards). Key names are shown in the report.
+    "ignoreKeys": [ ],
+
+    // Values that must be different in every environment.
+    //   ConnectionString = compare server + database, UrlHost = compare host + port, Exact = whole value.
+    "mustDiffer": [
+      { "key": "*ConnectionString*", "compareAs": "ConnectionString" },
+      { "key": "*BaseUrl*",          "compareAs": "UrlHost" }
+    ],
+
+    // Services that must share some files (per environment) and differ in others.
+    "serviceGroups": [
+      {
+        "services": [ "RIMCoreOrderService", "RIMCoreAppInterface" ],
+        "sameFiles": [ "appsettings.json" ],
+        "differentFiles": [ "nlog.config" ]
+      },
+      {
+        "services": [ "RIMCoreAccountService", "RIMCoreAccountInterface" ],
+        "sameFiles": [ "appsettings.json" ],
+        "differentFiles": [ "nlog.config" ]
+      }
+    ],
+
+    // Change a rule's severity: "Error", "Warning", "Info" or "Off".
+    "severityOverrides": {
+      // "CONFIG_DUPLICATE_KEY": "Warning"
+    }
+  }
+}
