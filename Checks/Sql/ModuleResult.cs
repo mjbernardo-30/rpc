@@ -11,6 +11,9 @@ public sealed class ModuleResult
     public required string SqlRoot { get; init; }
     public string ScriptsDir => Path.GetDirectoryName(ImplListPath)!;
 
+    /// <summary>"SG / DRIM", or just "DRIM" when the db path has no {country}.</summary>
+    public string Label => Country.Length == 0 ? Module : $"{Country} / {Module}";
+
     public List<string> ListedScripts { get; } = new();
     public List<Finding> Findings { get; } = new();
 

@@ -15,6 +15,10 @@ public static class RuleIds
     public const string ImplEmpty = "IMPL_EMPTY";
     public const string ImplSqlFolderMissing = "IMPL_SQL_FOLDER_MISSING";
 
+    // encoding
+    public const string EncodingNotUtf8 = "ENCODING_NOT_UTF8";
+    public const string EncodingBom = "ENCODING_BOM";
+
     // content
     public const string SyntaxError = "SYNTAX_ERROR";              // never overridable / suppressible
     public const string ScriptEmpty = "SCRIPT_EMPTY";
@@ -96,6 +100,18 @@ public sealed class RulesConfig
 
     /// <summary>If false, suppressions can only accept warnings - errors (disallowed operations) always block.</summary>
     public bool AllowSuppressingErrors { get; set; } = false;
+
+    /// <summary>Database root, relative to --repo or absolute. {country} is optional. Overridden by --db-path.</summary>
+    public string DbPath { get; set; } = "{country}/Database";
+
+    /// <summary>Folder under the database root holding &lt;Module&gt;\impl_list.txt.</summary>
+    public string ScriptsFolder { get; set; } = "scripts";
+
+    /// <summary>Folder under the database root holding &lt;Module&gt;\...\*.sql.</summary>
+    public string SqlFolder { get; set; } = "sql";
+
+    /// <summary>Scripts must be UTF-8; optional BOM policy.</summary>
+    public FileEncodingRules FileEncoding { get; set; } = new();
 
     /// <summary>New tables / procedures must be granted in the grant script.</summary>
     public GrantCheckConfig GrantCheck { get; set; } = new();

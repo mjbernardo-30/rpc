@@ -4,8 +4,9 @@ using ReleaseChecker.Core;
 namespace ReleaseChecker.Checks.Sql;
 
 /// <summary>
-/// SQL SCRIPTS check: for each &lt;Country&gt;\Database\scripts\&lt;Module&gt;\impl_list.txt,
-/// verifies the listed scripts exist and validates their content (syntax, allowlist, ordering).
+/// SQL SCRIPTS check: for each &lt;dbPath&gt;\scripts\&lt;Module&gt;\impl_list.txt,
+/// verifies the listed scripts exist and validates their content (encoding, syntax, allowlist, grants, ordering).
+/// dbPath comes from --db-path or rules.json "sql.dbPath" (default "{country}/Database"; {country} is optional).
 /// </summary>
 public sealed class SqlScriptCheck : IReleaseCheck
 {
@@ -16,14 +17,14 @@ public sealed class SqlScriptCheck : IReleaseCheck
     {
         SqlRules.Use(rules.Sql);
 
-        var modules = Discover(options);
+        string dbPath = options.DbPath ?? rules.Sql.DbPath;
+        var modules = Discover(options, rules.Sql, dbPath);
         if (modules.Count == 0)
         {
             return new SkippedSection
             {
                 Title = Title,
-                Reason = $"No {options.ImplListFileName} found under {options.RepoRoot} " +
-                         @"(expected <Country>\Database\scripts\<Module>\" + options.ImplListFileName + ")."
+                Reason = $"No {options.ImplListFileName} found (expected {dbPath}/{rules.Sql.ScriptsFolder}/<Module>/{options.ImplListFileName} under {options.RepoRoot})."
             };
         }
 
@@ -35,28 +36,30 @@ public sealed class SqlScriptCheck : IReleaseCheck
             SuppressionEngine.Apply(m, options.SuppressionsPath);
         }
 
-        return new SqlSection { Title = Title, Modules = modules };
+        return new SqlSection { Title = Title, Modules = modules, DbPath = dbPath };
     }
 
-    /// <summary>Finds &lt;Country&gt;\Database\scripts\&lt;Module&gt;\impl_list.txt.</summary>
-    private static List<ModuleResult> Discover(CliOptions options)
+    /// <summary>Finds &lt;dbPath&gt;\&lt;scriptsFolder&gt;\&lt;Module&gt;\impl_list.txt for each country (or once, without {country}).</summary>
+    private static List<ModuleResult> Discover(CliOptions options, RulesConfig cfg, string dbPath)
     {
         var modules = new List<ModuleResult>();
-        if (!Directory.Exists(options.RepoRoot)) return modules;
 
-        var countryDirs = options.Country is not null
-            ? new[] { Path.Combine(options.RepoRoot, options.Country) }
-            : Directory.GetDirectories(options.RepoRoot).Where(d => Directory.Exists(Path.Combine(d, "Database"))).ToArray();
+        var countries = PathTemplate.Countries(options.RepoRoot, dbPath, options.Country,
+            c => Directory.Exists(Path.Combine(PathTemplate.Resolve(options.RepoRoot, dbPath, c), cfg.ScriptsFolder)));
 
-        foreach (var countryDir in countryDirs.OrderBy(d => d))
+        if (options.Country is not null && !PathTemplate.HasToken(dbPath, "country"))
+            Console.WriteLine($"Note: --country is ignored for SQL because the db path '{dbPath}' has no {{country}}.");
+
+        foreach (var country in countries)
         {
-            string country = Path.GetFileName(countryDir);
-            string scriptsRoot = Path.Combine(countryDir, "Database", "scripts");
-            string sqlRoot = Path.Combine(countryDir, "Database", "sql");
+            string dbRoot = PathTemplate.Resolve(options.RepoRoot, dbPath, country);
+            string scriptsRoot = Path.Combine(dbRoot, cfg.ScriptsFolder);
+            string sqlRoot = Path.Combine(dbRoot, cfg.SqlFolder);
+            string label = country.Length == 0 ? dbRoot : country;
 
             if (!Directory.Exists(scriptsRoot))
             {
-                Console.Error.WriteLine($"[{country}] scripts folder not found: {scriptsRoot}");
+                Console.Error.WriteLine($"[{label}] scripts folder not found: {scriptsRoot}");
                 continue;
             }
 
@@ -71,7 +74,7 @@ public sealed class SqlScriptCheck : IReleaseCheck
 
                 if (!File.Exists(implList))
                 {
-                    Console.Error.WriteLine($"[{country}/{module}] {options.ImplListFileName} not found, skipped.");
+                    Console.Error.WriteLine($"[{label}/{module}] {options.ImplListFileName} not found, skipped.");
                     continue;
                 }
 
@@ -92,6 +95,7 @@ public sealed class SqlScriptCheck : IReleaseCheck
 public sealed class SqlSection : CheckSection
 {
     public required List<ModuleResult> Modules { get; init; }
+    public required string DbPath { get; init; }
 
     public override int Items => Modules.Sum(m => m.ListedScripts.Count);
     public override int Passed => Modules.Sum(m => m.ScriptsPassed);
@@ -101,10 +105,12 @@ public sealed class SqlSection : CheckSection
 
     public override void WriteReport(StringBuilder sb)
     {
+        sb.AppendLine($"DB path : {DbPath}");
+
         foreach (var m in Modules)
         {
             sb.AppendLine();
-            sb.AppendLine($"{m.Country} / {m.Module}  [{(m.Errors > 0 ? "FAIL" : "PASS")}]  " +
+            sb.AppendLine($"{m.Label}  [{(m.Errors > 0 ? "FAIL" : "PASS")}]  " +
                           $"{m.ListedScripts.Count} scripts: {m.ScriptsPassed} passed, {m.ScriptsFailed} failed");
             sb.AppendLine(ReportWriter.Thin);
 
@@ -129,10 +135,12 @@ public sealed class SqlSection : CheckSection
 
     public override void WriteConsole()
     {
+        Console.WriteLine($"  DB path : {DbPath}");
+
         foreach (var m in Modules)
         {
             Console.WriteLine();
-            ConsoleOut.Write($"  {m.Country}/{m.Module} ", ConsoleColor.Cyan);
+            ConsoleOut.Write($"  {m.Label} ", ConsoleColor.Cyan);
             string status = m.Errors > 0 ? "FAIL" : "PASS";
             ConsoleOut.Write(status, ConsoleOut.StatusColor(status));
             Console.WriteLine($" ({m.ListedScripts.Count} scripts: {m.ScriptsPassed} passed, {m.ScriptsFailed} failed" +

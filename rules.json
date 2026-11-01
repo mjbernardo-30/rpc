@@ -2,6 +2,18 @@
 // One section per check: "sql" for SQL SCRIPTS, "config" for CONFIG.
 {
   "sql": {
+    // Database root, relative to --repo or absolute. {country} is optional (drop it for a published collection).
+    // Overridden by --db-path.
+    "dbPath": "{country}/Database",
+    "scriptsFolder": "scripts",      // <dbPath>/scripts/<Module>/impl_list.txt
+    "sqlFolder": "sql",              // <dbPath>/sql/<Module>/.../*.sql
+
+    // Scripts must be UTF-8 (ASCII counts). utf8Bom: "Any", "Required" or "Forbidden".
+    "fileEncoding": {
+      "requireUtf8": true,
+      "utf8Bom": "Any"
+    },
+
     // 160 = SQL Server 2022, 150 = 2019, 140 = 2017, 130 = 2016
     "parserVersion": 160,
 
@@ -72,18 +84,24 @@
   },
 
   "config": {
-    // Service config folder relative to the repo. {country} and {env} are filled in; must end with {service}.
-    "pathTemplate": "{country}/App/Config/{env}/Web/{service}",
+    // Environment root, relative to --repo or absolute. {env} required, {country} optional. Overridden by --config-path.
+    // Every folder below it (any depth) holding one of the files below is an application, e.g.
+    //   Online/Web/V2/RIMCoreOrderService, Batch/Programs/RIMSInternal/RIMS.Programs.V2
+    "pathTemplate": "{country}/App/Config/{env}",
 
-    // Compared against each other: same keys everywhere, but database / base URL must differ.
+    // Compared against each other: same keys everywhere, but database / base URL / MQ host must differ.
     "environments": [ "SIT", "UAT", "PROD" ],
 
-    // Every service must have these files in every environment.
+    // Config files. A file present in one environment must exist in all of them.
+    // requiredIn = application path patterns that must always have the file.
     "files": [
-      { "name": "appsettings.json", "format": "json" },
-      { "name": "nlog.config",      "format": "xml" },
-      { "name": "web.config",       "format": "xml" }
+      { "name": "appsettings.json", "format": "json", "requiredIn": [ "*" ] },
+      { "name": "nlog.config",      "format": "xml",  "requiredIn": [ "*" ] },
+      { "name": "web.config",       "format": "xml",  "requiredIn": [ "*Web*" ] }
     ],
+
+    // Application paths to skip (wildcards), e.g. "Online/Web/V1/*"
+    "excludeApplications": [ ],
 
     // XML attributes that identify an element, so order doesn't matter: <add key="...">, <target name="...">
     "xmlIdentityAttributes": [ "key", "name", "id" ],
@@ -91,14 +109,47 @@
     // Keys left out of all comparisons (wildcards). Key names are shown in the report.
     "ignoreKeys": [ ],
 
-    // Values that must be different in every environment.
-    //   ConnectionString = compare server + database, UrlHost = compare host + port, Exact = whole value.
-    "mustDiffer": [
-      { "key": "*ConnectionString*", "compareAs": "ConnectionString" },
-      { "key": "*BaseUrl*",          "compareAs": "UrlHost" }
+    // Keys that must exist with a non-empty value. whenSectionExists: only for applications that use the section.
+    "requiredKeys": [
+      {
+        "name": "WMQConfiguration",
+        "file": "appsettings.json",
+        "applications": [ "*" ],
+        "whenSectionExists": "WMQConfiguration",
+        "allowEmpty": false,
+        "keys": [
+          "WMQConfiguration:ActiveMQManager:Hostname",
+          "WMQConfiguration:ActiveMQManager:PortNo",
+          "WMQConfiguration:ActiveMQManager:QueueManager",
+          "WMQConfiguration:ActiveMQManager:Channel",
+          "WMQConfiguration:PassiveMQManager:Hostname",
+          "WMQConfiguration:PassiveMQManager:PortNo",
+          "WMQConfiguration:PassiveMQManager:QueueManager",
+          "WMQConfiguration:PassiveMQManager:Channel",
+          "WMQConfiguration:EnquiryQueues:SendQueueName",
+          "WMQConfiguration:EnquiryQueues:ReceiveQueueName",
+          "WMQConfiguration:EnquiryQueues:TimeOutPeriod",
+          "WMQConfiguration:TransactionQueues:SendQueueName",
+          "WMQConfiguration:TransactionQueues:ReceiveQueueName",
+          "WMQConfiguration:TransactionQueues:TimeOutPeriod",
+          "WMQConfiguration:CompositeQueues:SendQueueName",
+          "WMQConfiguration:CompositeQueues:ReceiveQueueName",
+          "WMQConfiguration:CompositeQueues:TimeOutPeriod",
+          "WMQConfiguration:UserId",
+          "WMQConfiguration:ChannelId"
+        ]
+      }
     ],
 
-    // Services that must share some files (per environment) and differ in others.
+    // Values that must be different in every environment.
+    //   ConnectionString = server + database, UrlHost = URL host + port, Host = host name value, Exact = whole value.
+    "mustDiffer": [
+      { "key": "*ConnectionString*",                  "compareAs": "ConnectionString" },
+      { "key": "*BaseUrl*",                           "compareAs": "UrlHost" },
+      { "key": "WMQConfiguration:*MQManager:Hostname", "compareAs": "Host" }
+    ],
+
+    // Applications (folder name or full path) that must share some files per environment and differ in others.
     "serviceGroups": [
       {
         "services": [ "RIMCoreOrderService", "RIMCoreAppInterface" ],
@@ -114,7 +165,7 @@
 
     // Change a rule's severity: "Error", "Warning", "Info" or "Off".
     "severityOverrides": {
-      // "CONFIG_DUPLICATE_KEY": "Warning"
+      // "CONFIG_APP_MISSING": "Error"
     }
   }
 }

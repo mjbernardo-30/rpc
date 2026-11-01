@@ -77,7 +77,16 @@ To add another check:
 
 ## SQL check
 
-Layout:
+Database root: `--db-path` argument, else `"sql" > "dbPath"`, default `{country}/Database` (relative to `--repo` or
+absolute; `{country}` is optional). For the published collection without country folders:
+```
+ReleaseChecker.exe SQL --repo D:\Release\R2026.11 --db-path "Database"
+```
+
+Scripts must be **UTF-8** (`ENCODING_NOT_UTF8`, error). ANSI / Windows-1252 and UTF-16 files are caught with the line of
+the first bad byte. Optional BOM policy: `"sql" > "fileEncoding" > "utf8Bom"` = `Any` | `Required` | `Forbidden` (`ENCODING_BOM`).
+
+Layout (default):
 ```
 <repo>\<Country>\Database\scripts\<Module>\impl_list.txt
 <repo>\<Country>\Database\scripts\<Module>\sqlcheck.suppressions.json   (optional)
@@ -137,6 +146,7 @@ must grant the configured permissions. Configured in `"sql" > "grantCheck"` in r
 | Rule ID | Default |
 |---|---|
 | `SYNTAX_ERROR` | Error (fixed) |
+| `ENCODING_NOT_UTF8`, `ENCODING_BOM` | Error |
 | `STATEMENT_NOT_ALLOWED`, `DROP_TABLE_NOT_ALLOWED`, `TRUNCATE_NOT_ALLOWED` | Error |
 | `IMPL_MISSING_FILE`, `IMPL_DUPLICATE`, `IMPL_SQL_FOLDER_MISSING`, `SUPPRESSION_FILE_INVALID` | Error |
 | `GRANT_MISSING` | Error |
@@ -150,51 +160,59 @@ must grant the configured permissions. Configured in `"sql" > "grantCheck"` in r
 
 ## Config check
 
-Layout: `--config-path` argument, else `"config" > "pathTemplate"` in rules.json, default `{country}/App/Config/{env}/Web/{service}`.
-If the folders move, just pass a new pattern (relative to `--repo`, must end with `{service}`):
+Environment root: `--config-path` argument, else `"config" > "pathTemplate"`, default `{country}/App/Config/{env}`
+(relative to `--repo` or absolute; `{env}` required, `{country}` optional). If the folders move, just pass a new pattern:
 ```
-ReleaseChecker.exe Config --repo C:\src\oms --config-path "{country}/App/Config/{env}/Web/{service}"
-```
-```
-oms\SG\App\Config\SIT\Web\RIMCoreOrderService\appsettings.json, nlog.config, web.config
-oms\SG\App\Config\UAT\Web\RIMCoreOrderService\...
-oms\SG\App\Config\PROD\Web\RIMCoreOrderService\...
+ReleaseChecker.exe Config --repo C:\src\oms
+ReleaseChecker.exe Config --repo C:\src\web-repo --config-path "{country}/Web/Config/{env}"
 ```
 
-Per country and service:
-1. The service folder and every file in `files` exist in every environment.
-2. **Key parity**: the same keys exist in SIT, UAT and PROD. appsettings keys use .NET notation (`Services:AccountApi:BaseUrl`);
-   XML keys use element paths with identity attributes (`configuration:appSettings:add[BaseUrl]:@value`), so order doesn't matter.
-3. **Must differ**: database and base URL values are different in every environment. Connection strings are compared on
-   server + database (so a different timeout doesn't count as "different"); URLs on host + port.
-4. **Service groups**: e.g. `RIMCoreOrderService` and `RIMCoreAppInterface` must have the same `appsettings.json` (same keys
-   and values) but a different `nlog.config`, in each environment. Groups are skipped in a country that doesn't have both services.
+Every folder below the environment root, at any depth, that holds `appsettings.json`, `nlog.config` or `web.config`
+is an **application**, so web services and batch programs are found without listing them:
+```
+SG\App\Config\SIT\Online\Web\V2\RIMCoreOrderService\         -> Online/Web/V2/RIMCoreOrderService
+SG\App\Config\SIT\Batch\Programs\RIMSInternal\RIMS.EDAG.V2\   -> Batch/Programs/RIMSInternal/RIMS.EDAG.V2
+```
 
-Values are never written to the report except server/database names and URL hosts (connection strings may hold passwords).
-Use `ignoreKeys` for keys that are environment-specific by design.
+Per country and application:
+1. **Folders and files tally**: an application missing in an environment is a warning; a file present in one
+   environment but missing in another is an error. `requiredIn` makes a file mandatory (web.config only for `*Web*`).
+2. **Key parity**: the same keys exist in SIT, UAT and PROD (all three files).
+3. **Required keys**: e.g. the full `WMQConfiguration` block (Active/Passive MQ manager, Enquiry/Transaction/Composite
+   queues, UserId, ChannelId) must be present and non-empty in every environment, for applications that use MQ.
+4. **Must differ**: database (server + database), base URL host and MQ host are different in every environment.
+5. **Groups**: e.g. `RIMCoreOrderService` and `RIMCoreAppInterface` have the same `appsettings.json` and a
+   different `nlog.config` per environment (matched by folder name).
+
+Values are never written to the report except server/database names and host names.
 
 ```
-SG  [FAIL]  2 services: 0 passed, 2 failed
+SG  [FAIL]  5 applications: 1 passed, 4 failed
 --------------------------------------------------------------------------------
-1. RIMCoreAppInterface - FAIL
-     - [appsettings.json] 'Services:AccountApi:BaseUrl': UAT, PROD point to the same host (prod-api.bank.local:443) - it must be different per environment. [CONFIG_SAME_ACROSS_ENV]
-     - [appsettings.json] PROD: must be the same as RIMCoreOrderService but differs - extra: Services:AccountApi:Timeout [CONFIG_GROUP_NOT_SAME]
-     - [nlog.config] SIT: identical to RIMCoreOrderService - it must be specific to RIMCoreAppInterface. [CONFIG_GROUP_NOT_DIFFERENT]
-2. RIMCoreOrderService - FAIL
-     - [appsettings.json] 'Services:AccountApi:Timeout' missing in PROD (present in SIT, UAT). [CONFIG_KEY_MISSING]
+1. Batch/Programs/RIMSInternal/RIMS.EDAG.V2 - PASS
+2. Batch/Programs/RIMSInternal/RIMS.Programs.V2 - FAIL
+     - [appsettings.json] PROD: WMQConfiguration incomplete - missing WMQConfiguration:PassiveMQManager:Channel [CONFIG_REQUIRED_KEY_MISSING]
+     - [appsettings.json] PROD: WMQConfiguration has empty values - WMQConfiguration:UserId [CONFIG_REQUIRED_KEY_EMPTY]
+     - [appsettings.json] 'WMQConfiguration:ActiveMQManager:Hostname': UAT, PROD point to the same host (mq-prod01) ... [CONFIG_SAME_ACROSS_ENV]
+3. Online/Web/V2/RIMCoreAppInterface - FAIL
      ...
+5. Online/Web/V2/RIMCoreSharedService - PASS
+     Warning: Application folder missing in UAT, PROD (present in SIT). [CONFIG_APP_MISSING]
 ```
 
 ### Config rule IDs (change with `"config" > "severityOverrides"`)
 
 | Rule ID | Default | Meaning |
 |---|---|---|
-| `CONFIG_ENV_MISSING` | Warning | Environment folder not found for a country (left out of the comparison) |
-| `CONFIG_SERVICE_MISSING` | Warning | Service folder in some environments but not others (compared where it exists) |
-| `CONFIG_FILE_MISSING` | Error | appsettings.json / nlog.config / web.config missing |
+| `CONFIG_ENV_MISSING` | Warning | Environment folder not found (left out of the comparison) |
+| `CONFIG_APP_MISSING` | Warning | Application folder in some environments but not others (compared where it exists) |
+| `CONFIG_FILE_MISSING` | Error | Required file missing, or file present in one environment but not another |
 | `CONFIG_INVALID_FILE` | Error | File can't be parsed |
 | `CONFIG_DUPLICATE_KEY` | Error | Key declared twice in one file (last one silently wins) |
 | `CONFIG_KEY_MISSING` | Error | Key present in some environments but not others |
-| `CONFIG_SAME_ACROSS_ENV` | Error | Database / base URL is the same in two or more environments |
-| `CONFIG_GROUP_NOT_SAME` | Error | File that must match the group's first service differs |
-| `CONFIG_GROUP_NOT_DIFFERENT` | Error | File that must be service-specific is identical |
+| `CONFIG_REQUIRED_KEY_MISSING` | Error | Required key (e.g. WMQConfiguration) missing |
+| `CONFIG_REQUIRED_KEY_EMPTY` | Error | Required key has an empty value |
+| `CONFIG_SAME_ACROSS_ENV` | Error | Database / base URL / MQ host is the same in two or more environments |
+| `CONFIG_GROUP_NOT_SAME` | Error | File that must match the group's first application differs |
+| `CONFIG_GROUP_NOT_DIFFERENT` | Error | File that must be application-specific is identical |
+

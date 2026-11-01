@@ -14,6 +14,35 @@ namespace ReleaseChecker.Checks.Sql;
 /// </summary>
 public static class SqlValidator
 {
+    private static void CheckEncoding(ModuleResult module, string listed, EncodingCheck.Result enc, FileEncodingRules? cfg)
+    {
+        if (cfg is null) return;
+
+        if (cfg.RequireUtf8 && !enc.IsUtf8)
+        {
+            module.Findings.Add(new(Severity.Error, RuleIds.EncodingNotUtf8, "Encoding", listed, enc.InvalidLine,
+                $"Script is {enc.Description}, not UTF-8. Re-save it as UTF-8."));
+            return;
+        }
+
+        if (!enc.IsUtf8) return;
+
+        if (cfg.Utf8Bom.Equals("Required", StringComparison.OrdinalIgnoreCase) && !enc.HasUtf8Bom)
+            module.Findings.Add(new(Severity.Error, RuleIds.EncodingBom, "Encoding", listed, null,
+                "Script is UTF-8 without BOM; the BOM is required (re-save as \"UTF-8 with BOM\")."));
+        else if (cfg.Utf8Bom.Equals("Forbidden", StringComparison.OrdinalIgnoreCase) && enc.HasUtf8Bom)
+            module.Findings.Add(new(Severity.Error, RuleIds.EncodingBom, "Encoding", listed, null,
+                "Script is UTF-8 with BOM; the BOM is not allowed (re-save as \"UTF-8\" without BOM)."));
+    }
+
+    /// <summary>Number of BOM bytes to skip when decoding.</summary>
+    private static int Preamble(byte[] bytes, EncodingCheck.Result enc)
+    {
+        if (enc.HasUtf8Bom) return 3;
+        var p = enc.ReadAs.GetPreamble();
+        return p.Length > 0 && bytes.Length >= p.Length && bytes.AsSpan(0, p.Length).SequenceEqual(p) ? p.Length : 0;
+    }
+
     public static void Validate(ModuleResult module, List<(string Listed, string FullPath)> scripts)
     {
         var rules = SqlRules.Current;
@@ -22,9 +51,12 @@ public static class SqlValidator
         // Pass 1: parse + rules per file
         foreach (var (listed, fullPath) in scripts)
         {
-            string text;
-            using (var sr = new StreamReader(fullPath, detectEncodingFromByteOrderMarks: true))
-                text = sr.ReadToEnd();
+            byte[] bytes = File.ReadAllBytes(fullPath);
+            var enc = EncodingCheck.Inspect(bytes);
+            CheckEncoding(module, listed, enc, rules.FileEncoding);
+
+            // decode with the detected encoding so the script is still parsed even when the encoding is wrong
+            string text = enc.ReadAs.GetString(bytes, Preamble(bytes, enc), bytes.Length - Preamble(bytes, enc));
 
             if (string.IsNullOrWhiteSpace(text))
             {
