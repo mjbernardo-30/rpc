@@ -21,6 +21,9 @@ public sealed class CliOptions
     // Config check options
     public string? ConfigPath { get; init; }
 
+    // SQL check: database root pattern (overrides rules.json sql.dbPath)
+    public string? DbPath { get; init; }
+
     // SQL helper commands (no repo needed)
     public bool ListStatements { get; init; }
     public string? ExplainFile { get; init; }
@@ -28,7 +31,7 @@ public sealed class CliOptions
     public static CliOptions? Parse(string[] args)
     {
         var mode = CheckMode.All;
-        string? repo = null, country = null, module = null, report = null, implName = null, rules = null, suppressions = null, explain = null, configPath = null;
+        string? repo = null, country = null, module = null, report = null, implName = null, rules = null, suppressions = null, explain = null, configPath = null, dbPath = null;
         bool failOnWarning = false, listStatements = false;
 
         int start = 0;
@@ -58,6 +61,7 @@ public sealed class CliOptions
                 case "--impl-list": implName = Next(); break;
                 case "--suppressions": suppressions = Next(); break;
                 case "--config-path": configPath = Next(); break;
+                case "--db-path": dbPath = Next(); break;
                 case "--list-statements": listStatements = true; break;
                 case "--explain": explain = Next(); break;
                 case "-h":
@@ -83,6 +87,7 @@ public sealed class CliOptions
             ImplListFileName = implName ?? "impl_list.txt",
             SuppressionsPath = suppressions,
             ConfigPath = configPath,
+            DbPath = dbPath,
             ListStatements = listStatements,
             ExplainFile = explain
         };
@@ -104,29 +109,33 @@ public sealed class CliOptions
 
         Options:
           --repo <path>          repo root (required)
-          --country SG           limit to one country (SQL and Config)
+          --country SG           limit to one country (when the path has {country})
           --module DRIM          limit to one SQL module
           --report <file>        report file (default release-check.txt)
           --rules <file>         rules file (default rules.json next to the exe)
           --fail-on-warning      exit 1 on warnings too
 
         SQL options:
+          --db-path <pattern>    database root, relative to --repo or absolute (default from rules.json:
+                                 "{country}/Database"); {country} is optional, e.g. --db-path "Database"
           --impl-list <name>     impl list file name (default impl_list.txt)
           --suppressions <file>  one suppression file for all modules
           --list-statements      list ScriptDom statement class names
           --explain <file.sql>   show the class name of each statement in a script
 
         Config options:
-          --config-path <tpl>    config folder pattern relative to --repo (overrides rules.json pathTemplate)
-                                 tokens {country}, {env}, {service}; must end with {service}
-                                 e.g. --config-path "{country}/App/Config/{env}/Web/{service}"
+          --config-path <pattern> environment root, relative to --repo or absolute (default from rules.json:
+                                 "{country}/App/Config/{env}"); {env} required, {country} optional.
+                                 Every folder below it with appsettings.json / nlog.config / web.config is checked,
+                                 e.g. --config-path "{country}/Web/Config/{env}"
 
         SQL layout:
-          <repo>\<Country>\Database\scripts\<Module>\impl_list.txt
-          <repo>\<Country>\Database\sql\<Module>\...\*.sql
+          <db path>\scripts\<Module>\impl_list.txt
+          <db path>\sql\<Module>\...\*.sql
 
-        Config layout (config.pathTemplate in rules.json):
-          <repo>\<Country>\App\Config\<Env>\Web\<Service>\appsettings.json, nlog.config, web.config
+        Config layout:
+          <config path>\Online\Web\V2\RIMCoreOrderService\appsettings.json, nlog.config, web.config
+          <config path>\Batch\Programs\RIMSInternal\RIMS.Programs.V2\appsettings.json, nlog.config
 
         Exit code: 0 = pass, 1 = errors (or warnings with --fail-on-warning), 2 = bad arguments / layout / config.
         """;
